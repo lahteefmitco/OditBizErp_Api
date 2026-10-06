@@ -1,0 +1,81 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "OditBiz_Local1!"
+      MSSQL_PID: "Developer"
+      MSSQL_MEMORY_LIMIT_MB: "4096"
+    mem_limit: 4g
+    ports:
+      - "1433:1433"
+    volumes:
+      - sql_data:/var/opt/mssql
+      - "./CELL_CRAFT_BURDUBAI-20261005112813-(e1ba6538-4aa7-4ec7-b407-722fd6f6e063)-Full.bak:/backup/db.bak:ro"
+      - "./mob_user.bak:/backup/mob_user.bak:ro"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          if [ -x /opt/mssql-tools18/bin/sqlcmd ]; then
+            SQLCMD=/opt/mssql-tools18/bin/sqlcmd
+          else
+            SQLCMD=/opt/mssql-tools/bin/sqlcmd
+          fi
+          "$$SQLCMD" -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  sql-restore:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      SQLHOST: sqlserver
+      SQLPASSWORD: "OditBiz_Local1!"
+      SQLDATABASE: CELL_CRAFT_BURDUBAI
+      BAK_PATH: /backup/db.bak
+    volumes:
+      - ./docker/sql/restore.sh:/restore.sh:ro
+    entrypoint: ["/bin/bash", "/restore.sh"]
+    restart: "no"
+
+  sql-restore-mobil:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    depends_on:
+      sql-restore:
+        condition: service_completed_successfully
+    environment:
+      SQLHOST: sqlserver
+      SQLPASSWORD: "OditBiz_Local1!"
+      SQLDATABASE: MOBIL_USERS
+      BAK_PATH: /backup/mob_user.bak
+    volumes:
+      - ./docker/sql/restore.sh:/restore.sh:ro
+    entrypoint: ["/bin/bash", "/restore.sh"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      sql-restore-mobil:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__ConnStr: "Server=sqlserver,1433;Database=CELL_CRAFT_BURDUBAI;User ID=sa;Password=OditBiz_Local1!;Encrypt=False;TrustServerCertificate=True;Pooling=True;Max Pool Size=50;Connect Timeout=300;"
+      ConnectionStrings__ERPConnection: "Server=sqlserver,1433;Database=CELL_CRAFT_BURDUBAI;User ID=sa;Password=OditBiz_Local1!;Encrypt=False;TrustServerCertificate=True;Pooling=True;Max Pool Size=50;Connect Timeout=300;"
+      ConnectionStrings__ClientConnection: "Server=sqlserver,1433;Database=MOBIL_USERS;User ID=sa;Password=OditBiz_Local1!;Encrypt=False;TrustServerCertificate=True;Pooling=True;Max Pool Size=50;Connect Timeout=300;"
+
+volumes:
+  sql_data:

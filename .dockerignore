@@ -1,0 +1,7 @@
+**/.vs
+**/bin
+**/obj
+**/*.bak
+**/*.user
+**/node_modules
+.git
